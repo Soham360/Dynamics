@@ -37,12 +37,16 @@ Future extensions include compound pulley networks, coupled bodies, rolling cons
 
 - Drag a card into the sandbox, or click it to add/select its component. Click a canvas element to edit it. Arrow keys move a focused component.
 - In the surface model select Surface, then Flat or an incline preset. Positive force is rightward on a flat surface and downhill on an incline. Negative force acts the other way.
-- Select the quantity under **Solve for**. Worked solutions update from the current inputs and observation time. Copy LaTeX exports those steps.
-- Run, pause, reset, or scrub time. Numerical answers use the **observation time** field; scrubbing previews the trajectory without changing that field.
+- Select the quantity under **Solve for**. Worked solutions update from the current inputs and simulation timeline. Copy LaTeX exports those steps.
+- Run, pause, reset, or scrub time. The answer, equations, animation, and graph cursor use the same current simulation time, starting at zero. **Simulation duration** sets the end of the timeline.
 - Switch between SI and US customary units. Internal values remain SI, avoiding accumulated conversion drift. US mass uses **slugs**, force uses **lbf**, lengths use **ft**. Slugs distinguish mass from pound-force; lbm input is not implemented.
-- Save/Open experiments as versioned JSON; the most recent experiment is also restored from browser local storage. No account or backend is involved.
+- Undo/redo experiment edits with the toolbar or Ctrl/⌘ Z and Ctrl/⌘ Shift Z outside text fields. History includes property edits, layout moves, unit changes, resets, imports, and model changes (up to 80 snapshots per session). A new edit after undo discards the redo branch.
+- The graph plots the selected quantity through the entire simulation interval. **Export data CSV** downloads all available outputs in the selected unit system, with labeled columns and 201 regular samples plus exact stopping/impact events. Infinite values export as empty cells.
+- Save/Open experiments as versioned JSON; the most recent experiment is also restored from browser local storage. Imports validate parameter ranges, friction and collision constraints, unique supported elements, and drawing coordinates before replacing the current experiment. Valid unfinished systems can be saved. Invalid edits never overwrite the last valid autosave. No account or backend is involved.
 
 ## Physics and display details
+
+Time-dependent values now evaluate at the playhead rather than at a separate observation time. Copy LaTeX includes the current time. Initial surface acceleration/friction and post-impact collision quantities retain their stated meanings; their graphs are flat. Switching tabs or editing inputs resets the playhead to zero. Playback pauses when the tab is hidden.
 
 Calculations use g = 9.80665 m/s². Substitutions in the worked derivations use SI; final answers use the selected unit system. All units and sign conventions are visible in the interface.
 
@@ -54,6 +58,9 @@ Animations are schematics: surface, pulley, spring, and linear travel are compre
 
 - `physics.js`: pure SI solvers, model schemas, validation, and unit conversion.
 - `app.js`: state, SVG drawing, interaction, animation, persistence, and math rendering.
+- `analysis.js` and `chart.js`: event-aware graph samples, CSV export, graph rendering, and the synchronized cursor.
+- `experiment.js`: validated imports and detached undo/redo snapshots.
+- `tests/workbench.test.js`: import rejection, history branching, event sampling, graph bounds, and CSV conversions.
 - `styles.css`: responsive interface and keyboard focus styles.
 - `tests/physics.test.js`: analytical reference cases, conservation laws, stopping/reversal, invalid input, and unit consistency.
 - `.github/workflows/checks.yml`: automated tests for pushes and pull requests.

@@ -3,7 +3,7 @@ export const dimensions={mass:[1,14.5939029372,'kg','slug'],length:[1,0.3048,'m'
 export function unit(dim,system){return dimensions[dim][system==='imperial'?3:2];}
 export function toDisplay(value,dim,system){return value/dimensions[dim][system==='imperial'?1:0];}
 export function toSI(value,dim,system){return value*dimensions[dim][system==='imperial'?1:0];}
-export const fields={m:['Mass','mass',0.001,1e6],m2:['Right mass','mass',0.001,1e6],angle:['Angle','angle',0,89],F:['Applied force (+ downhill/right)','force',-1e7,1e7],mus:['Static friction μs','none',0,10],muk:['Kinetic friction μk','none',0,10],v0:['Initial velocity','speed',-1e4,1e4],duration:['Observation time','time',0.01,120],speed:['Launch speed','speed',0,1e4],launch:['Launch angle','angle',0,90],height:['Launch height','length',0,1e6],k:['Spring constant','stiffness',0.001,1e7],x0:['Initial extension','length',-1e4,1e4],radius:['Radius','length',0.001,1e6],orbital:['Tangential speed','speed',0,1e5]};
+export const fields={m:['Mass','mass',0.001,1e6],m2:['Right mass','mass',0.001,1e6],angle:['Angle','angle',0,89],F:['Applied force (+ downhill/right)','force',-1e7,1e7],mus:['Static friction μs','none',0,10],muk:['Kinetic friction μk','none',0,10],v0:['Initial velocity','speed',-1e4,1e4],duration:['Simulation duration','time',0.01,120],speed:['Launch speed','speed',0,1e4],launch:['Launch angle','angle',0,90],height:['Launch height','length',0,1e6],k:['Spring constant','stiffness',0.001,1e7],x0:['Initial extension','length',-1e4,1e4],radius:['Radius','length',0.001,1e6],orbital:['Tangential speed','speed',0,1e5]};
 export const models={
  surface:{name:'Surfaces & forces',icon:'◩',description:'One block on a fixed surface. Forces act along the plane; positive is downhill (right on a flat surface). Gravity and normal force are automatic. Drawing positions do not change constraints.',required:['block','surface'],allowed:['block','surface','force','friction'],targets:{a:['Acceleration','accel'],N:['Normal force','force'],friction:['Friction (signed)','force'],v:['Final velocity','speed'],s:['Displacement','length']},defaults:{m:5,angle:30,F:0,mus:0.3,muk:0.2,v0:0,duration:3},assumptions:'Rigid block, fixed plane, uniform gravity, Coulomb friction. Applied force is parallel to the plane. No collisions or surface boundaries.'},
  pulley:{name:'Pulley system',icon:'◎',description:'Ideal Atwood machine: two masses joined by a taut, massless rope over one fixed pulley. Positive acceleration is left mass down, right mass up.',required:['block','mass2','pulley'],allowed:['block','mass2','pulley'],targets:{a:['Acceleration','accel'],T:['Rope tension','force'],v:['Left velocity','speed'],s:['Left displacement','length']},defaults:{m:5,m2:3,v0:0,duration:2},assumptions:'One frictionless, massless fixed pulley; massless inextensible rope; no travel limits. Both masses have equal and opposite velocities.'},
@@ -19,7 +19,7 @@ Object.assign(models,{
  collision:{name:'Impulse & collision',icon:'⇄',description:'One-dimensional impact between two masses. Set signed pre-impact velocities; the animation shows approach, impact, and departure. The impact occurs at t = 1 s in the schematic.',required:['block','mass2'],allowed:['block','mass2'],targets:{v1:['Left final velocity','speed'],v2:['Right final velocity','speed'],impulse:['Impulse on left','momentum'],loss:['Energy dissipated','energy']},defaults:{m:3,m2:2,v0:5,v2:-1,restitution:0.8,duration:3},assumptions:'Isolated instantaneous one-dimensional collision; no external impulse. Coefficient of restitution is between 0 (perfectly inelastic) and 1 (elastic). Approach requires left velocity > right velocity.'}
 });
 export function validate(model,p){
- if(!models[model]) throw Error('Unknown model');
+ if(!Object.hasOwn(models,model)) throw Error('Unknown model');
  for(const key of Object.keys(models[model].defaults)){
   const f=fields[key];if(!Number.isFinite(p[key])||p[key]<f[2]||p[key]>f[3])throw Error(`${f[0]} is outside its supported range.`);
  }
@@ -42,6 +42,8 @@ export function surfaceMotion(p,t,hasForce=true,hasFriction=true){
 const n=x=>Number(x.toPrecision(6)).toString();
 export function solve(model,p,parts,t=p.duration){
  validate(model,p);
+ if(!Number.isFinite(t)||t<0||t>120)throw Error('Simulation time must be between 0 and 120 seconds.');
+ if(!Array.isArray(parts)||parts.some(e=>!e||!models[model].allowed.includes(e.kind))||new Set(parts.map(e=>e.kind)).size!==parts.length)throw Error('Unsupported or duplicate elements.');
  const present=kind=>parts.some(e=>e.kind===kind);
  const missing=models[model].required.filter(k=>!present(k));
  if(missing.length)throw Error('Add the required elements: '+missing.join(', ')+'.');

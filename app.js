@@ -1,4 +1,7 @@
 import {G,models,fields,unit,toDisplay,toSI,solve} from './physics.js';
+import {parseExperiment,History} from './experiment.js';
+import {renderAnalysis,updatePlayhead,currentCSV} from './chart.js';
+const history=new History();
 const $=id=>document.getElementById(id),svg=$('canvas');
 const names={block:'Mass block',mass2:'Right mass',surface:'Surface',force:'Applied force',friction:'Friction',pulley:'Fixed pulley',projectile:'Projectile',spring:'Spring',orbit:'Circular path',rotor:'Rigid rotor'};
 const icons={block:'□',mass2:'□',surface:'◩',force:'↗',friction:'≋',pulley:'◎',projectile:'↗',spring:'∿',orbit:'◌',rotor:'⟳'};
@@ -14,9 +17,20 @@ function example(model='surface',system=state?.units||'metric'){
  state={version:1,model,units:system,params:{...models[model].defaults},parts,target:Object.keys(models[model].targets)[0]};
  selected=parts.find(e=>e.kind==='block'||e.kind==='projectile')?.kind||parts[0].kind;time=0;pause();render();
 }
-function persist(){try{localStorage.setItem('dynamics-experiment',JSON.stringify(state));}catch{}}
-function pause(){running=false;$('play').textContent='▶ Run simulation';}
-function calculate(){try{solution=solve(state.model,state.params,state.parts);error='';}catch(e){solution=null;error=e.message;pause();}}
+function persist(){
+ history.record(state);updateHistory();
+ try{parseExperiment(JSON.stringify(state));localStorage.setItem('dynamics-experiment',JSON.stringify(state));}catch{}
+}
+function updateHistory(){$('undo').disabled=!history.canUndo;$('redo').disabled=!history.canRedo;}
+function restoreHistory(direction){const next=history[direction]();if(!next)return;state=next;selected=state.parts.find(e=>e.kind===selected)?.kind||state.parts[0]?.kind;time=0;pause();render();}
+$('undo').onclick=()=>restoreHistory('undo');$('redo').onclick=()=>restoreHistory('redo');
+document.addEventListener('keydown',event=>{
+ if(!(event.ctrlKey||event.metaKey)||event.altKey||event.target.closest('input,textarea,[contenteditable="true"]'))return;
+ const key=event.key.toLowerCase();
+ if(key==='z'||key==='y'){event.preventDefault();restoreHistory(key==='y'||event.shiftKey?'redo':'undo');}
+});
+function pause(){running=false;$('result').setAttribute('aria-live','polite');$('play').textContent='▶ Run simulation';}
+function calculate(){try{solution=solve(state.model,state.params,state.parts,time);error='';}catch(e){solution=null;error=e.message;pause();}}
 function render(){calculate();renderTabs();renderPalette();renderProperties();renderTarget();renderSolution();draw();persist();}
 function renderTabs(){$('models').innerHTML=Object.entries(models).map(([key,m])=>`<button data-model="${key}" class="${key===state.model?'active':''}" aria-pressed="${key===state.model}"><span>${m.icon}</span>${m.name}</button>`).join('');$('scene-name').textContent=models[state.model].name;$('model-note').textContent=models[state.model].description;$('units').value=state.units;$('timeline').max=state.params.duration;}
 function renderPalette(){$('palette').innerHTML=models[state.model].allowed.map(kind=>`<button class="element-card" draggable="true" data-kind="${kind}" ${state.parts.some(e=>e.kind===kind)?'aria-label="'+names[kind]+' already added"':''}><span class="element-icon">${icons[kind]}</span><span><strong>${names[kind]}</strong><small>${state.parts.some(e=>e.kind===kind)?'In your system · select':'Click or drag to add'}</small></span><span class="add">${state.parts.some(e=>e.kind===kind)?'✓':'+'}</span></button>`).join('');}
@@ -33,11 +47,12 @@ function renderProperties(){
 }
 function renderTarget(){const m=models[state.model];$('target').innerHTML=Object.entries(m.targets).map(([key,v])=>`<option value="${key}">${v[0]}</option>`).join('');$('target').value=state.target;}
 function renderSolution(){
+ renderAnalysis(state,error);$('copy').disabled=Boolean(error);$('play').disabled=Boolean(error);try{parseExperiment(JSON.stringify(state));$('export').disabled=false;}catch{$('export').disabled=true;}if(solution)updatePlayhead(state,time,toDisplay(solution.values[state.target],models[state.model].targets[state.target][1],state.units));
  const target=models[state.model].targets[state.target];
  if(error){$('result').innerHTML=`<div class="error">${escape(error)}</div>`;$('steps').innerHTML='<p class="muted">Complete the system with valid parameters to see its worked solution.</p>';$('assumptions').textContent='';return;}
  const value=toDisplay(solution.values[state.target],target[1],state.units);
- $('result').innerHTML=`<span class="eyebrow">${escape(target[0].toUpperCase())}</span><div class="result-number">${fmt(value)} <span>${unit(target[1],state.units)}</span></div><small>${state.model==='collision'?'Post-impact result.':state.model==='surface'&&state.target==='a'?'Initial acceleration.':`Observation time: ${fmt(state.params.duration)} s.`}</small>`;
- $('steps').innerHTML=solution.steps.map((s,i)=>`<article class="step"><span class="step-index">0${i+1}</span><div><h3>${s.title}</h3><p>${s.detail}</p><div class="equation" data-equation="${i}"></div></div></article>`).join('')+`<article class="step answer"><span class="step-index">✓</span><div><h3>${target[0]}</h3><div class="equation" id="final-equation"></div><p>Substitution steps use SI units. The final answer uses your selected unit system.</p></div></article>`;
+ $('result').innerHTML=`<span class="eyebrow">${escape(target[0].toUpperCase())}</span><div class="result-number">${fmt(value)} <span>${unit(target[1],state.units)}</span></div><small>${state.model==='collision'?'Post-impact result.':state.model==='surface'&&state.target==='a'?'Initial acceleration.':`Simulation time: ${time.toFixed(2)} s.`}</small>`;
+ $('steps').innerHTML=solution.steps.map((s,i)=>`<article class="step"><span class="step-index">0${i+1}</span><div><h3>${s.title}</h3><p>${s.detail}</p><div class="equation" data-equation="${i}"></div></div></article>`).join('')+`<article class="step answer"><span class="step-index">✓</span><div><h3>${target[0]}</h3><div class="equation" id="final-equation"></div><p>Substitution steps use SI units at the current simulation time. The final answer uses your selected unit system.</p></div></article>`;
  const math=(node,latex)=>{if(window.katex)window.katex.render(latex,node,{displayMode:true,throwOnError:false,trust:false});else node.textContent=latex;};
  solution.steps.forEach((s,i)=>math(document.querySelector(`[data-equation="${i}"]`),s.latex));
  math($('final-equation'),`\\text{${target[0]}}=${Number.isFinite(value)?Number(value.toPrecision(6)):'\\infty'}\\,\\text{${unit(target[1],state.units)}}`);
@@ -61,7 +76,7 @@ function draw(){
  g=`<path d="M0 0 L300 0 L0 -${h} Z" fill="#dce5df" stroke="#a1b4a8" stroke-width="2"/><path d="M0 -${h} L300 0" stroke="#527866" stroke-width="4"/><text x="65" y="28" class="element-label">${p.angle}° surface</text>`;
  }else if(kind==='block'||kind==='mass2'){
  let m=kind==='mass2'?p.m2:p.m;
- if(live&&time>0){if(model==='surface'){let d=Math.tanh(live.s/8)*110;x+=d*Math.cos(p.angle*Math.PI/180);y+=d*Math.sin(p.angle*Math.PI/180);}if(model==='pulley')y+=(kind==='mass2'?-1:1)*Math.tanh(live.s/5)*65;if(model==='spring')x+=Math.tanh((live.x-p.x0)/2)*140;if(model==='kinematics')x+=Math.tanh(live.s/12)*180;if(model==='collision'){const v=kind==='mass2'?live.v2:live.v1,u=kind==='mass2'?p.v2:p.v0;const contact=kind==='mass2'?438:362;x=time<1?e.x+(contact-e.x)*time:contact+Math.tanh(v*(time-1)/10)*210;}if(model==='circular'){const orbit=state.parts.find(e=>e.kind==='orbit');x=orbit.x+120*Math.cos(p.orbital/p.radius*time);y=orbit.y+120*Math.sin(p.orbital/p.radius*time);}}
+ if(live&&time>0){if(model==='surface'){let d=Math.tanh(live.s/8)*110;x+=d*Math.cos(p.angle*Math.PI/180);y+=d*Math.sin(p.angle*Math.PI/180);}if(model==='pulley')y+=(kind==='mass2'?-1:1)*Math.tanh(live.s/5)*65;if(model==='spring')x+=Math.tanh((live.x-p.x0)/2)*140;if(model==='kinematics')x+=Math.tanh(live.s/12)*180;if(model==='collision'){const v=kind==='mass2'?live.v2:live.v1,u=kind==='mass2'?p.v2:p.v0;const contact=kind==='mass2'?438:362;x=time<1?e.x+(contact-e.x)*time:contact+Math.tanh(v*(time-1)/10)*210;}if(model==='circular'){const orbit=state.parts.find(e=>e.kind==='orbit');if(orbit){x=orbit.x+120*Math.cos(p.orbital/p.radius*time);y=orbit.y+120*Math.sin(p.orbital/p.radius*time);}}}
  if(model==='circular'&&time===0){const orbit=state.parts.find(e=>e.kind==='orbit');if(orbit){x=orbit.x+120;y=orbit.y;}}
  rotate=model==='surface'?p.angle:0;
  g=`<rect x="-38" y="-32" width="76" height="64" rx="10" fill="${kind==='mass2'?'#779785':'#e8a184'}" stroke="${kind==='mass2'?'#527866':'#ca7c5f'}" stroke-width="2"/><path d="M-28 -21H25" stroke="#ffffff70" stroke-width="2"/><text text-anchor="middle" y="5" fill="#3f3e35" font-size="17" font-weight="600">${fmt(toDisplay(m,'mass',state.units))}</text><text text-anchor="middle" y="22" fill="#554c43" font-size="11">${unit('mass',state.units)}</text><text y="56" text-anchor="middle" class="element-label">${model==='pulley'?(kind==='mass2'?'m₂':'m₁'):'mass'}</text>`;
@@ -75,6 +90,7 @@ function draw(){
  return `<g data-element="${kind}" tabindex="0" role="button" aria-label="Select ${names[kind]}" aria-pressed="${kind===selected}" transform="translate(${x},${y}) rotate(${rotate})" class="canvas-element ${kind===selected?'selected':''}"><rect class="hitbox" x="${kind==='surface'?-10:-48}" y="${kind==='surface'?-220:-45}" width="${kind==='surface'?320:96}" height="${kind==='surface'?245:100}" rx="12"/>${g}</g>`;
  }).join('');
  $('empty').hidden=state.parts.length>0;$('time').textContent=time.toFixed(2)+' s';$('timeline').value=time;
+ if(live)updatePlayhead(state,time,toDisplay(live[state.target],models[model].targets[state.target][1],state.units));
 }
 function add(kind,point){if(!models[state.model].allowed.includes(kind))return;pause();time=0;const existing=state.parts.find(e=>e.kind===kind);if(!existing)state.parts.push({kind,x:point?.x??locations[kind][0],y:point?.y??locations[kind][1]});selected=kind;render();}
 function point(event){const pt=svg.createSVGPoint();pt.x=event.clientX;pt.y=event.clientY;return pt.matrixTransform(svg.getScreenCTM().inverse());}
@@ -82,30 +98,24 @@ $('models').onclick=e=>{const button=e.target.closest('[data-model]');if(button)
 $('palette').onclick=e=>{const button=e.target.closest('[data-kind]');if(button)add(button.dataset.kind);};
 $('palette').ondragstart=e=>{const button=e.target.closest('[data-kind]');if(button)e.dataTransfer.setData('text/plain',button.dataset.kind);};
 svg.ondragover=e=>e.preventDefault();svg.ondrop=e=>{e.preventDefault();add(e.dataTransfer.getData('text/plain'),point(e));};
-svg.onpointerdown=e=>{const node=e.target.closest('[data-element]');if(!node)return;pause();time=0;selected=node.dataset.element;const p=point(e),el=state.parts.find(x=>x.kind===selected);drag={kind:selected,dx:p.x-el.x,dy:p.y-el.y};svg.setPointerCapture(e.pointerId);renderProperties();draw();};
+svg.onpointerdown=e=>{const node=e.target.closest('[data-element]');if(!node)return;pause();time=0;selected=node.dataset.element;const p=point(e),el=state.parts.find(x=>x.kind===selected);drag={kind:selected,dx:p.x-el.x,dy:p.y-el.y,original:{x:el.x,y:el.y}};svg.setPointerCapture(e.pointerId);calculate();renderSolution();renderProperties();draw();};
 svg.onpointermove=e=>{if(!drag)return;const p=point(e),el=state.parts.find(x=>x.kind===drag.kind);el.x=Math.max(60,Math.min(700,p.x-drag.dx));el.y=Math.max(80,Math.min(350,p.y-drag.dy));draw();};
-svg.onpointerup=()=>{if(drag){drag=null;persist();}};svg.onpointercancel=()=>drag=null;
-svg.onkeydown=e=>{const kind=e.target.closest('[data-element]')?.dataset.element;if(!kind)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=kind;renderProperties();return;}const delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key];if(delta){e.preventDefault();pause();time=0;selected=kind;const el=state.parts.find(x=>x.kind===kind);el.x=Math.max(60,Math.min(700,el.x+delta[0]));el.y=Math.max(80,Math.min(350,el.y+delta[1]));renderProperties();draw();svg.querySelector(`[data-element="${kind}"]`).focus();persist();}};
-$('properties').oninput=e=>{const key=e.target.dataset.param;if(!key)return;pause();time=0;state.params[key]=toSI(e.target.value===''?NaN:Number(e.target.value),fields[key][1],state.units);calculate();renderSolution();draw();$('timeline').max=state.params.duration;persist();};
+svg.onpointerup=()=>{if(drag){drag=null;persist();}};svg.onpointercancel=()=>{if(drag){Object.assign(state.parts.find(e=>e.kind===drag.kind),drag.original);drag=null;draw();}};
+svg.onkeydown=e=>{const kind=e.target.closest('[data-element]')?.dataset.element;if(!kind)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=kind;renderProperties();return;}const delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key];if(delta){e.preventDefault();pause();time=0;selected=kind;const el=state.parts.find(x=>x.kind===kind);el.x=Math.max(60,Math.min(700,el.x+delta[0]));el.y=Math.max(80,Math.min(350,el.y+delta[1]));calculate();renderSolution();renderProperties();draw();svg.querySelector(`[data-element="${kind}"]`).focus();persist();}};
+$('properties').oninput=e=>{const key=e.target.dataset.param;if(!key)return;pause();time=0;state.params[key]=toSI(e.target.value===''?NaN:Number(e.target.value),fields[key][1],state.units);calculate();renderSolution();draw();$('timeline').max=Number.isFinite(state.params.duration)?state.params.duration:1;persist();};
 $('properties').onclick=e=>{if(e.target.closest('#remove')){pause();time=0;state.parts=state.parts.filter(x=>x.kind!==selected);selected=state.parts[0]?.kind;render();}if(e.target.dataset.angle){state.params.angle=Number(e.target.dataset.angle);time=0;pause();render();}};
-$('units').onchange=e=>{state.units=e.target.value;render();};$('target').onchange=e=>{state.target=e.target.value;renderSolution();persist();};
+$('units').onchange=e=>{state.units=e.target.value;render();};$('target').onchange=e=>{state.target=e.target.value;renderSolution();draw();persist();};
 $('clear').onclick=()=>{pause();state.parts=[];selected=null;time=0;render();};$('reset').onclick=()=>example(state.model);
-$('play').onclick=()=>{if(error)return;if(running){pause();return;}if(time>=state.params.duration)time=0;running=true;last=performance.now();$('play').textContent='Ⅱ Pause';};
-$('rewind').onclick=()=>{pause();time=0;draw();};$('timeline').oninput=e=>{pause();time=Number(e.target.value);draw();};
-function frame(now){if(running){time=Math.min(state.params.duration,time+(now-last)/1000);last=now;draw();if(time>=state.params.duration)pause();}requestAnimationFrame(frame);}requestAnimationFrame(frame);
+$('play').onclick=()=>{if(error)return;if(running){pause();calculate();renderSolution();return;}if(time>=state.params.duration)time=0;running=true;$('result').setAttribute('aria-live','off');last=performance.now();$('play').textContent='Ⅱ Pause';};
+$('rewind').onclick=()=>{pause();time=0;calculate();renderSolution();draw();};$('timeline').oninput=e=>{pause();time=Number(e.target.value);calculate();renderSolution();draw();};
+let lastSolutionTime=0;
+function frame(now){if(running){time=Math.min(state.params.duration,time+Math.min((now-last)/1000,0.1));last=now;draw();if(now-lastSolutionTime>=100||time>=state.params.duration){calculate();renderSolution();lastSolutionTime=now;}if(time>=state.params.duration)pause();}requestAnimationFrame(frame);}requestAnimationFrame(frame);
+document.addEventListener('visibilitychange',()=>{if(document.hidden){pause();calculate();renderSolution();}});
 $('help').onclick=()=>$('help-dialog').showModal();$('close-help').onclick=()=>$('help-dialog').close();
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 $('export').onclick=()=>download('dynamics-experiment.json',JSON.stringify(state,null,2),'application/json');
-function parseState(raw){
- const s=JSON.parse(raw),m=models[s.model];if(s.version!==1||!m||!['metric','imperial'].includes(s.units)||!Object.hasOwn(m.targets,s.target)||!Array.isArray(s.parts)||s.parts.length>m.allowed.length)throw Error('Invalid experiment format.');
- const params={};for(const key of Object.keys(m.defaults)){if(typeof s.params?.[key]!=='number'||!Number.isFinite(s.params[key]))throw Error('Invalid parameter: '+key);params[key]=s.params[key];}
- const seen=new Set();const parts=s.parts.map(e=>{if(!m.allowed.includes(e.kind)||seen.has(e.kind)||!Number.isFinite(e.x)||!Number.isFinite(e.y))throw Error('Invalid element.');seen.add(e.kind);return {kind:e.kind,x:Math.max(60,Math.min(700,e.x)),y:Math.max(80,Math.min(350,e.y))};});
- return {version:1,model:s.model,units:s.units,target:s.target,params,parts};
-}
-$('import').onclick=()=>$('file').click();$('file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw Error('Experiment file is too large.');const next=parseState(await file.text());state=next;selected=state.parts[0]?.kind;time=0;pause();render();}catch(err){alert('Could not open experiment: '+err.message);}e.target.value='';};
-$('copy').onclick=async()=>{if(!solution)return;const target=models[state.model].targets[state.target];const text=solution.steps.map(s=>`% ${s.title}\n${s.latex}`).join('\n\n')+`\n\n% ${target[0]} (${state.units})\n${toDisplay(solution.values[state.target],target[1],state.units)}\\,\\text{${unit(target[1],state.units)}}`;
+$('import').onclick=()=>$('file').click();$('file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw Error('Experiment file is too large.');const next=parseExperiment(await file.text());state=next;selected=state.parts[0]?.kind;time=0;pause();render();}catch(err){alert('Could not open experiment: '+err.message);}e.target.value='';};
+$('csv').onclick=()=>{if(error)return;download(`dynamics-${state.model}-${state.units}.csv`,currentCSV(state),'text/csv;charset=utf-8');};
+$('copy').onclick=async()=>{if(!solution)return;const target=models[state.model].targets[state.target];const text=solution.steps.map(s=>`% ${s.title}\n${s.latex}`).join('\n\n')+`\n\n% ${target[0]} (${state.units}), t = ${time} s\n${toDisplay(solution.values[state.target],target[1],state.units)}\\,\\text{${unit(target[1],state.units)}}`;
  try{await navigator.clipboard.writeText(text);$('copy').textContent='Copied ✓';setTimeout(()=>$('copy').textContent='Copy LaTeX',1500);}catch{download('dynamics-solution.tex',text,'text/plain');}};
-try{const raw=localStorage.getItem('dynamics-experiment');if(raw){state=parseState(raw);selected=state.parts[0]?.kind;render();}else example();}catch{example();}
-
-
-
+try{const raw=localStorage.getItem('dynamics-experiment');if(raw){state=parseExperiment(raw);selected=state.parts[0]?.kind;render();}else example();}catch{example();}
