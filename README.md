@@ -33,6 +33,14 @@ This is a foundation for a broader dynamics simulator, **not yet an arbitrary mu
 
 Future extensions include compound pulley networks, coupled bodies, rolling constraints, rigid-body planar motion, impacts in 2D, damped/forced vibrations, and general constraint assembly.
 
+## Single-screen workbench
+
+The app uses the browser viewport rather than a scrolling document. Choose a topic from the Experiment dropdown. Sandbox, Graph, and Solution occupy the same central panel, with the timeline below. On desktop, Elements and Properties remain beside the panel; on narrower or shorter screens they become tabs. Long solutions are paginated, including the final answer and model assumptions, and long equations split into rows and fit the panel width. The live answer stays in the sandbox header.
+
+Playback supports ¼×, ½×, 1×, and 2×, plus an exact +0.1s step while paused. View changes and playback speed do not modify the experiment or its undo history. Arrow keys, Home, and End navigate the view tabs.
+
+The fitted layout is checked at 1280×720, 1024×600, 1920×1080, 375×667, 390×844, and 844×390. Switching panels and solution pages replaces scrolling; it does not remove the original controls or derivation steps.
+
 ## Use
 
 - Drag a card into the sandbox, or click it to add/select its component. Click a canvas element to edit it. Arrow keys move a focused component.
@@ -61,6 +69,8 @@ Animations are schematics: surface, pulley, spring, and linear travel are compre
 - `analysis.js` and `chart.js`: event-aware graph samples, CSV export, graph rendering, and the synchronized cursor.
 - `experiment.js`: validated imports and detached undo/redo snapshots.
 - `tests/workbench.test.js`: import rejection, history branching, event sampling, graph bounds, and CSV conversions.
+- `view.js` and `playback.js`: viewport panel selection, solution pagination, equation fitting, and bounded playback timing.
+- `tests/playback.test.js`: speed scaling, end limits, clock stalls, and pagination boundaries.
 - `styles.css`: responsive interface and keyboard focus styles.
 - `tests/physics.test.js`: analytical reference cases, conservation laws, stopping/reversal, invalid input, and unit consistency.
 - `.github/workflows/checks.yml`: automated tests for pushes and pull requests.

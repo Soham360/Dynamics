@@ -1,6 +1,8 @@
 import {G,models,fields,unit,toDisplay,toSI,solve} from './physics.js';
 import {parseExperiment,History} from './experiment.js';
 import {renderAnalysis,updatePlayhead,currentCSV} from './chart.js';
+import {refreshSteps} from './view.js';
+import {advanceTime} from './playback.js';
 const history=new History();
 const $=id=>document.getElementById(id),svg=$('canvas');
 const names={block:'Mass block',mass2:'Right mass',surface:'Surface',force:'Applied force',friction:'Friction',pulley:'Fixed pulley',projectile:'Projectile',spring:'Spring',orbit:'Circular path',rotor:'Rigid rotor'};
@@ -32,7 +34,7 @@ document.addEventListener('keydown',event=>{
 function pause(){running=false;$('result').setAttribute('aria-live','polite');$('play').textContent='▶ Run simulation';}
 function calculate(){try{solution=solve(state.model,state.params,state.parts,time);error='';}catch(e){solution=null;error=e.message;pause();}}
 function render(){calculate();renderTabs();renderPalette();renderProperties();renderTarget();renderSolution();draw();persist();}
-function renderTabs(){$('models').innerHTML=Object.entries(models).map(([key,m])=>`<button data-model="${key}" class="${key===state.model?'active':''}" aria-pressed="${key===state.model}"><span>${m.icon}</span>${m.name}</button>`).join('');$('scene-name').textContent=models[state.model].name;$('model-note').textContent=models[state.model].description;$('units').value=state.units;$('timeline').max=state.params.duration;}
+function renderTabs(){$('model-select').innerHTML=Object.entries(models).map(([key,m])=>`<option value="${key}">${m.name}</option>`).join('');$('model-select').value=state.model;$('scene-name').textContent=models[state.model].name;$('model-note').textContent=models[state.model].description;$('model-note').title=models[state.model].description;$('units').value=state.units;$('timeline').max=state.params.duration;}
 function renderPalette(){$('palette').innerHTML=models[state.model].allowed.map(kind=>`<button class="element-card" draggable="true" data-kind="${kind}" ${state.parts.some(e=>e.kind===kind)?'aria-label="'+names[kind]+' already added"':''}><span class="element-icon">${icons[kind]}</span><span><strong>${names[kind]}</strong><small>${state.parts.some(e=>e.kind===kind)?'In your system · select':'Click or drag to add'}</small></span><span class="add">${state.parts.some(e=>e.kind===kind)?'✓':'+'}</span></button>`).join('');}
 function editableKeys(){
  const groups={block:['m','v0','acceleration','restitution'],mass2:['m2','v2'],rotor:['inertia','torque','omega0'],surface:['angle'],force:['F'],friction:['mus','muk'],projectile:['speed','launch','height'],spring:['k','x0'],orbit:['radius','orbital'],pulley:[]};
@@ -47,16 +49,18 @@ function renderProperties(){
 }
 function renderTarget(){const m=models[state.model];$('target').innerHTML=Object.entries(m.targets).map(([key,v])=>`<option value="${key}">${v[0]}</option>`).join('');$('target').value=state.target;}
 function renderSolution(){
- renderAnalysis(state,error);$('copy').disabled=Boolean(error);$('play').disabled=Boolean(error);try{parseExperiment(JSON.stringify(state));$('export').disabled=false;}catch{$('export').disabled=true;}if(solution)updatePlayhead(state,time,toDisplay(solution.values[state.target],models[state.model].targets[state.target][1],state.units));
+ renderAnalysis(state,error);$('copy').disabled=Boolean(error);$('play').disabled=Boolean(error);$('step-time').disabled=Boolean(error);try{parseExperiment(JSON.stringify(state));$('export').disabled=false;}catch{$('export').disabled=true;}if(solution)updatePlayhead(state,time,toDisplay(solution.values[state.target],models[state.model].targets[state.target][1],state.units));
  const target=models[state.model].targets[state.target];
- if(error){$('result').innerHTML=`<div class="error">${escape(error)}</div>`;$('steps').innerHTML='<p class="muted">Complete the system with valid parameters to see its worked solution.</p>';$('assumptions').textContent='';return;}
+ if(error){$('live-answer').textContent='Check properties';$('result').innerHTML=`<div class="error">${escape(error)}</div>`;$('steps').innerHTML='<p class="muted">Complete the system with valid parameters to see its worked solution.</p>';$('assumptions').textContent='';refreshSteps(state.model);return;}
  const value=toDisplay(solution.values[state.target],target[1],state.units);
+ $('live-answer').textContent=fmt(value)+' '+unit(target[1],state.units);$('live-answer').title=target[0];$('live-answer').setAttribute('aria-label',target[0]+': '+$('live-answer').textContent);
  $('result').innerHTML=`<span class="eyebrow">${escape(target[0].toUpperCase())}</span><div class="result-number">${fmt(value)} <span>${unit(target[1],state.units)}</span></div><small>${state.model==='collision'?'Post-impact result.':state.model==='surface'&&state.target==='a'?'Initial acceleration.':`Simulation time: ${time.toFixed(2)} s.`}</small>`;
  $('steps').innerHTML=solution.steps.map((s,i)=>`<article class="step"><span class="step-index">0${i+1}</span><div><h3>${s.title}</h3><p>${s.detail}</p><div class="equation" data-equation="${i}"></div></div></article>`).join('')+`<article class="step answer"><span class="step-index">✓</span><div><h3>${target[0]}</h3><div class="equation" id="final-equation"></div><p>Substitution steps use SI units at the current simulation time. The final answer uses your selected unit system.</p></div></article>`;
- const math=(node,latex)=>{if(window.katex)window.katex.render(latex,node,{displayMode:true,throwOnError:false,trust:false});else node.textContent=latex;};
+ const math=(node,latex)=>{node.replaceChildren();for(const row of latex.split(/\\qquad |,\\quad /)){const line=document.createElement('div');line.className='math-row';node.append(line);if(window.katex)window.katex.render(row,line,{displayMode:true,throwOnError:false,trust:false});else line.textContent=row;}};
  solution.steps.forEach((s,i)=>math(document.querySelector(`[data-equation="${i}"]`),s.latex));
  math($('final-equation'),`\\text{${target[0]}}=${Number.isFinite(value)?Number(value.toPrecision(6)):'\\infty'}\\,\\text{${unit(target[1],state.units)}}`);
  $('assumptions').innerHTML=`<strong>Model assumptions</strong><span>${models[state.model].assumptions} Gravity = ${fmt(toDisplay(G,'accel',state.units))} ${unit('accel',state.units)}.</span>`;
+ refreshSteps(state.model);
 }
 function arrow(x1,y1,x2,y2,color='#ee815c',label=''){if(!color.startsWith('#'))color='#'+color;return `<path d="M${x1},${y1} L${x2},${y2}" stroke="${color}" stroke-width="2.5" marker-end="url(#arrow-${color.slice(1)})"/><text x="${x2+8}" y="${y2-7}" fill="${color}" class="vector-label">${label}</text>`;}
 function draw(){
@@ -94,7 +98,7 @@ function draw(){
 }
 function add(kind,point){if(!models[state.model].allowed.includes(kind))return;pause();time=0;const existing=state.parts.find(e=>e.kind===kind);if(!existing)state.parts.push({kind,x:point?.x??locations[kind][0],y:point?.y??locations[kind][1]});selected=kind;render();}
 function point(event){const pt=svg.createSVGPoint();pt.x=event.clientX;pt.y=event.clientY;return pt.matrixTransform(svg.getScreenCTM().inverse());}
-$('models').onclick=e=>{const button=e.target.closest('[data-model]');if(button)example(button.dataset.model);};
+$('model-select').onchange=e=>example(e.target.value);
 $('palette').onclick=e=>{const button=e.target.closest('[data-kind]');if(button)add(button.dataset.kind);};
 $('palette').ondragstart=e=>{const button=e.target.closest('[data-kind]');if(button)e.dataTransfer.setData('text/plain',button.dataset.kind);};
 svg.ondragover=e=>e.preventDefault();svg.ondrop=e=>{e.preventDefault();add(e.dataTransfer.getData('text/plain'),point(e));};
@@ -107,9 +111,10 @@ $('properties').onclick=e=>{if(e.target.closest('#remove')){pause();time=0;state
 $('units').onchange=e=>{state.units=e.target.value;render();};$('target').onchange=e=>{state.target=e.target.value;renderSolution();draw();persist();};
 $('clear').onclick=()=>{pause();state.parts=[];selected=null;time=0;render();};$('reset').onclick=()=>example(state.model);
 $('play').onclick=()=>{if(error)return;if(running){pause();calculate();renderSolution();return;}if(time>=state.params.duration)time=0;running=true;$('result').setAttribute('aria-live','off');last=performance.now();$('play').textContent='Ⅱ Pause';};
+$('step-time').onclick=()=>{if(error)return;pause();time=Math.min(state.params.duration,Number((time+0.1).toFixed(10)));calculate();renderSolution();draw();};
 $('rewind').onclick=()=>{pause();time=0;calculate();renderSolution();draw();};$('timeline').oninput=e=>{pause();time=Number(e.target.value);calculate();renderSolution();draw();};
 let lastSolutionTime=0;
-function frame(now){if(running){time=Math.min(state.params.duration,time+Math.min((now-last)/1000,0.1));last=now;draw();if(now-lastSolutionTime>=100||time>=state.params.duration){calculate();renderSolution();lastSolutionTime=now;}if(time>=state.params.duration)pause();}requestAnimationFrame(frame);}requestAnimationFrame(frame);
+function frame(now){if(running){time=advanceTime(time,(now-last)/1000,state.params.duration,Number($('playback-speed').value));last=now;draw();if(now-lastSolutionTime>=100||time>=state.params.duration){calculate();renderSolution();lastSolutionTime=now;}if(time>=state.params.duration)pause();}requestAnimationFrame(frame);}requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){pause();calculate();renderSolution();}});
 $('help').onclick=()=>$('help-dialog').showModal();$('close-help').onclick=()=>$('help-dialog').close();
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
